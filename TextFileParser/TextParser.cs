@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml;
 
@@ -63,7 +64,25 @@ namespace TextFileParser
                 foreach (HeaderDefinition def in _headerDefinitions.OrderBy(t => t.LineIndex))
                 {
                     //parse header row in token index
-                    string[] row = tokens[def.LineIndex].Split(new string[] { this._fieldDelimiter }, StringSplitOptions.None);
+                    string[] row = null;
+                    if(this._fieldDelimiter == CommonFieldDelimiters.Comma && this._fieldWrapper == CommonFieldWrappers.DoubleQuote)
+                    {
+                        //MatchCollection matches = new Regex("((?<=\")[^\"]*(?=\"(,|$)+)|(?<=,|^)[^,\"]*(?=,|$))").Matches(tokens[def.LineIndex]);
+                        //List<string> result = new List<string>();
+                        //foreach (var match in matches)
+                        //{
+                        //    result.Add(match.ToString());
+                        //}
+                        //row = result.ToArray();
+                        row = SplitRow(tokens[def.LineIndex]).ToArray();
+                    }
+                    else
+                    {
+                        row = this._fieldDelimiter == CommonFieldDelimiters.Comma ?
+                            tokens[def.LineIndex].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None) :
+                            tokens[def.LineIndex].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None);
+                    }
+
                     DataTable newDt = new DataTable(def.TableName);
                     foreach (string token in row)
                     {
@@ -81,52 +100,85 @@ namespace TextFileParser
                     resultSet.Tables.Add(newDt);
                 }
                 DataTable dt = null;
+                DataTable dtErrors = new DataTable("ParseErrors");
+                dtErrors.Columns.Add(new DataColumn("RawData", typeof(string)));
+                dtErrors.Columns.Add(new DataColumn("Exception", typeof(string)));
                 for (int i = 0; i < tokens.Length; i++)
                 {
 
                     if (_headerDefinitions.Where(t => t.LineIndex == i).Count() == 1)
                     {
                         dt = resultSet.Tables[_headerDefinitions.Where(t => t.LineIndex == i).First().TableName];
+                        
                     }
                     else
                     {
                         if (dt != null)
                         {
-                            object[] rowSet = new object[dt.Columns.Count];
-                            string[] rowTokens = tokens[i].Split(new string[] { this._fieldDelimiter }, StringSplitOptions.None);
-                            //sanity check
-                            if (rowSet.Length < rowTokens.Length)
+                            try
                             {
-                                throw new Exception("Header and type mapping does not match parsed row token count");
-                            }
-                            else
-                            {
-                                for (int z = 0; z < rowTokens.Length; z++)
+                                object[] rowSet = new object[dt.Columns.Count];
+                                string[] rowTokens = null;
+                                if (this._fieldDelimiter == CommonFieldDelimiters.Comma && this._fieldWrapper == CommonFieldWrappers.DoubleQuote)
                                 {
-                                    switch (dt.Columns[z].DataType.Name)
-                                    {
-                                        case "Int32":
-                                            rowSet[z] = ParseAsInt(rowTokens[z]);
-                                            break;
-                                        case "Float":
-                                            rowSet[z] = ParseAsFloat(rowTokens[z]);
-                                            break;
-                                        case "Decimal":
-                                            rowSet[z] = ParseAsDecimal(rowTokens[z]);
-                                            break;
-                                        case "Int64":
-                                            rowSet[z] = ParseAsLong(rowTokens[z]);
-                                            break;
-                                        case "DateTime":
-                                            rowSet[z] = ParseAsXmlDateTime(rowTokens[z]);
-                                            break;
-                                        default:
-                                            rowSet[z] = rowTokens[z];
-                                            break;
-                                    }
-
+                                    //MatchCollection matches = new Regex("((?<=\")[^\"]*(?=\"(,|$)+)|(?<=,|^)[^,\"]*(?=,|$))").Matches(tokens[i]);
+                                    //List<string> result = new List<string>();
+                                    //foreach (var match in matches)
+                                    //{
+                                    //    result.Add(match.ToString());
+                                    //}
+                                    //rowTokens = result.ToArray();
+                                    rowTokens = SplitRow(tokens[i]).ToArray();
                                 }
-                                dt.Rows.Add(rowSet);
+                                else
+                                {
+                                    rowTokens = this._fieldDelimiter == CommonFieldDelimiters.Comma ?
+                                    tokens[i].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None) :
+                                    tokens[i].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None);
+                                }
+
+                                //sanity check
+                                if (rowSet.Length < rowTokens.Length)
+                                {
+                                    throw new Exception("Header and type mapping does not match parsed row token count");
+                                }
+                                else
+                                {
+                                    for (int z = 0; z < rowTokens.Length; z++)
+                                    {
+                                        switch (dt.Columns[z].DataType.Name)
+                                        {
+                                            case "Int32":
+                                                rowSet[z] = ParseAsInt(rowTokens[z]);
+                                                break;
+                                            case "Float":
+                                                rowSet[z] = ParseAsFloat(rowTokens[z]);
+                                                break;
+                                            case "Decimal":
+                                                rowSet[z] = ParseAsDecimal(rowTokens[z]);
+                                                break;
+                                            case "Int64":
+                                                rowSet[z] = ParseAsLong(rowTokens[z]);
+                                                break;
+                                            case "DateTime":
+                                                rowSet[z] = ParseAsXmlDateTime(rowTokens[z]);
+                                                break;
+                                            default:
+                                                rowSet[z] = rowTokens[z];
+                                                break;
+                                        }
+
+                                    }
+                                    dt.Rows.Add(rowSet);
+                                }
+                            }
+                            catch(Exception ex)
+                            {
+                                dtErrors.Rows.Add(new string[] { tokens[i], ex.Message });
+                                if(resultSet.Tables["ParseErrors"] == null)
+                                {
+                                    resultSet.Tables.Add(dtErrors);
+                                }
                             }
                         }
                     }
@@ -136,6 +188,81 @@ namespace TextFileParser
             catch(Exception exc)
             {
                 throw new TextParsingException(exc.Message);
+            }
+        }
+
+        public static IEnumerable<string> SplitRow(string row, char delimiter = ',')
+        {
+            var currentString = new StringBuilder();
+            var inQuotes = false;
+            var quoteIsEscaped = false; //Store when a quote has been escaped.
+            row = string.Format("{0}{1}", row, delimiter); //We add new cells at the delimiter, so append one for the parser.
+            foreach (var character in row.Select((val, index) => new { val, index }))
+            {
+                if (character.val == delimiter) //We hit a delimiter character...
+                {
+                    if (!inQuotes) //Are we inside quotes? If not, we've hit the end of a cell value.
+                    {
+                        //Console.WriteLine(currentString);
+                        yield return currentString.ToString();
+                        currentString.Clear();
+                    }
+                    else
+                    {
+                        currentString.Append(character.val);
+                    }
+                }
+                else
+                {
+                    if (character.val != ' ')
+                    {
+                        if (character.val == '"') //If we've hit a quote character...
+                        {
+                            if (character.val == '"' && inQuotes) //Does it appear to be a closing quote?
+                            {
+                                if (row[character.index + 1] == character.val && !quoteIsEscaped) //If the character afterwards is also a quote, this is to escape that (not a closing quote).
+                                {
+                                    quoteIsEscaped = true; //Flag that we are escaped for the next character. Don't add the escaping quote.
+                                }
+                                else if (quoteIsEscaped)
+                                {
+                                    quoteIsEscaped = false; //This is an escaped quote. Add it and revert quoteIsEscaped to false.
+                                    currentString.Append(character.val);
+                                }
+                                else if (!quoteIsEscaped && row[character.index + 1] != delimiter)
+                                {
+                                    currentString.Append(character.val); //...It's a quote inside a quote but is not escaped damnit Amazon
+                                }
+                                else
+                                {
+                                    inQuotes = false;
+                                }
+                            }
+                            else
+                            {
+                                if (!inQuotes)
+                                {
+                                    inQuotes = true;
+                                }
+                                else
+                                {
+                                    currentString.Append(character.val); //...It's a quote inside a quote.
+                                }
+                            }
+                        }
+                        else
+                        {
+                            currentString.Append(character.val);
+                        }
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrWhiteSpace(currentString.ToString())) //Append only if not new cell
+                        {
+                            currentString.Append(character.val);
+                        }
+                    }
+                }
             }
         }
 
@@ -189,7 +316,7 @@ namespace TextFileParser
                 return valu;
             }
             else
-                throw new Exception(string.Format("Token value {0} could not be parsed as an int", token));
+                throw new Exception(string.Format("Token value {0} could not be parsed as a long", token));
         }
 
         private float ParseAsFloat(string token)
@@ -240,7 +367,16 @@ namespace TextFileParser
             }
             catch
             {
-                throw new Exception(string.Format("Token value {0} could not be parsed as an Xml Date Time", token));
+                //fall back to regular date time parse
+                try
+                {
+                    if (string.IsNullOrEmpty(token)) return DateTime.MinValue;
+                    return DateTime.Parse(token);
+                }
+                catch
+                {
+                    throw new Exception(string.Format("Token value {0} could not be parsed as an Xml Date Time or a generic DateTime", token));
+                }
             }
         }
     }
