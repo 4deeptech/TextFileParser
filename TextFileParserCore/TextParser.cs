@@ -213,7 +213,7 @@ namespace TextFileParser
 
                     foreach (string token in row)
                     {
-                        newDt.Header.AddColumn(new Column(token.Trim(), _typeMap[token].Name));
+                        newDt.Header.AddColumn(new Column(token.Trim(), _typeMap[token].FullName));
                     }
                 }
                 
