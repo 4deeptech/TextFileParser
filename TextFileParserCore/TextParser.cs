@@ -105,11 +105,9 @@ namespace TextFileParser
                 dtErrors.Columns.Add(new DataColumn("Exception", typeof(string)));
                 for (int i = 0; i < tokens.Length; i++)
                 {
-
                     if (_headerDefinitions.Where(t => t.LineIndex == i).Count() == 1)
                     {
                         dt = resultSet.Tables[_headerDefinitions.Where(t => t.LineIndex == i).First().TableName];
-                        
                     }
                     else
                     {
@@ -186,6 +184,106 @@ namespace TextFileParser
                 return resultSet;
             }
             catch(Exception exc)
+            {
+                throw new TextParsingException(exc.Message);
+            }
+        }
+
+        public async Task<Data> ParseDataAsync(string rawString)
+        {
+            try
+            {
+                Data newDt = new Data();
+                string[] tokens = rawString.Split(new string[] { this._lineDelimiter }, StringSplitOptions.RemoveEmptyEntries);
+                //loop through and build headers
+                foreach (HeaderDefinition def in _headerDefinitions.OrderBy(t => t.LineIndex))
+                {
+                    //parse header row in token index
+                    string[] row = null;
+                    if (this._fieldDelimiter == CommonFieldDelimiters.Comma && this._fieldWrapper == CommonFieldWrappers.DoubleQuote)
+                    {
+                        row = SplitRow(tokens[def.LineIndex]).ToArray();
+                    }
+                    else
+                    {
+                        row = this._fieldDelimiter == CommonFieldDelimiters.Comma ?
+                            tokens[def.LineIndex].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None) :
+                            tokens[def.LineIndex].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None);
+                    }
+
+                    foreach (string token in row)
+                    {
+                        newDt.Header.AddColumn(new Column(token.Trim(), _typeMap[token].Name));
+                    }
+                }
+                
+                for (int i = _headerDefinitions.OrderBy(t => t.LineIndex).Last().LineIndex+1; i < tokens.Length; i++)
+                {
+                    try
+                    {
+                        object[] rowSet = new object[newDt.Header.Columns.Count];
+                        string[] rowTokens = null;
+                        if (this._fieldDelimiter == CommonFieldDelimiters.Comma && this._fieldWrapper == CommonFieldWrappers.DoubleQuote)
+                        {
+                            rowTokens = SplitRow(tokens[i]).ToArray();
+                        }
+                        else
+                        {
+                            rowTokens = this._fieldDelimiter == CommonFieldDelimiters.Comma ?
+                            tokens[i].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None) :
+                            tokens[i].Split(new string[] { this._fieldWrapper, this._fieldDelimiter }, StringSplitOptions.None);
+                        }
+
+                        //sanity check
+                        if (rowSet.Length < rowTokens.Length)
+                        {
+                            throw new Exception("Header and type mapping does not match parsed row token count");
+                        }
+                        else
+                        {
+                            Row row = new Row();
+                            for (int z = 0; z < rowTokens.Length; z++)
+                            {
+                                switch (newDt.Header.Columns[z].TypeName)
+                                {
+                                    case "Int32":
+                                        row.AddValue(newDt.Header.Columns[z].ColumnName, ParseAsInt(rowTokens[z]));
+                                        //rowSet[z] = ParseAsInt(rowTokens[z]);
+                                        break;
+                                    case "Float":
+                                        row.AddValue(newDt.Header.Columns[z].ColumnName, ParseAsFloat(rowTokens[z]));
+                                        //rowSet[z] = ParseAsFloat(rowTokens[z]);
+                                        break;
+                                    case "Decimal":
+                                        row.AddValue(newDt.Header.Columns[z].ColumnName, ParseAsDecimal(rowTokens[z]));
+                                        //rowSet[z] = ParseAsDecimal(rowTokens[z]);
+                                        break;
+                                    case "Int64":
+                                        row.AddValue(newDt.Header.Columns[z].ColumnName, ParseAsLong(rowTokens[z]));
+                                        //rowSet[z] = ParseAsLong(rowTokens[z]);
+                                        break;
+                                    case "DateTime":
+                                        row.AddValue(newDt.Header.Columns[z].ColumnName, ParseAsXmlDateTime(rowTokens[z]));
+                                        //rowSet[z] = ParseAsXmlDateTime(rowTokens[z]);
+                                        break;
+                                    default:
+                                        row.AddValue(newDt.Header.Columns[z].ColumnName, rowTokens[z]);
+                                        //rowSet[z] = rowTokens[z];
+                                        break;
+                                }
+
+                            }
+                            newDt.Rows.Add(row);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        
+                    }
+                }
+                return newDt;
+            }
+            catch (Exception exc)
             {
                 throw new TextParsingException(exc.Message);
             }
@@ -280,6 +378,25 @@ namespace TextFileParser
 
             }
             catch(Exception exc)
+            {
+                throw;
+            }
+        }
+
+        public async Task<Data> ParseDataAsync(FileInfo nfo)
+        {
+            return await ParseDataAsync(new FileStream(nfo.FullName, FileMode.Open));
+        }
+
+        public async Task<Data> ParseDataAsync(Stream stream)
+        {
+            try
+            {
+                StreamReader reader = new StreamReader(stream);
+                return await ParseDataAsync(reader.ReadToEnd());
+
+            }
+            catch (Exception exc)
             {
                 throw;
             }
